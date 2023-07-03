@@ -1,0 +1,436 @@
+<meta charset="UTF-8">
+<link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.css">
+<script src="https://code.jquery.com/jquery-3.3.1.slim.min.js"></script>
+<script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
+<script>
+  (g=>{var h,a,k,p="The Google Maps JavaScript API",c="google",l="importLibrary",q="__ib__",m=document,b=window;b=b[c]||(b[c]={});var d=b.maps||(b.maps={}),r=new Set,e=new URLSearchParams,u=()=>h||(h=new Promise(async(f,n)=>{await (a=m.createElement("script"));e.set("libraries",[...r]+"");for(k in g)e.set(k.replace(/[A-Z]/g,t=>"_"+t[0].toLowerCase()),g[k]);e.set("callback",c+".maps."+q);a.src=`https://maps.${c}apis.com/maps/api/js?`+e;d[q]=f;a.onerror=()=>h=n(Error(p+" could not load."));a.nonce=m.querySelector("script[nonce]")?.nonce||"";m.head.append(a)}));d[l]?console.warn(p+" only loads once. Ignoring:",g):d[l]=(f,...n)=>r.add(f)&&u().then(()=>d[l](f,...n))})({
+    key: "YOUR_KEY_HERE",
+    v: "weekly",
+  });
+</script>
+</script>
+<style>
+  body {
+    padding: 10px;
+    background: transparent;
+  }
+
+  .circle{
+    width: 30px;
+    height: 30px;
+    border-radius: 50%; 
+    display: flex;
+    position: relative;
+    left:-5px;
+    justify-content: center; 
+    align-items: center; 
+  }
+
+  .marker-window .circle{
+    left:0;
+  }
+
+  .marker-window {
+    text-align:center;
+    min-width: 150px;
+    border-radius: 5px;
+    min-height: 50px;
+    display: none;
+    padding: .5rem;
+    background-color: rgba(255,255,255,.85);
+  }
+
+  .card-body{
+    padding: .25rem;
+  }
+
+  .icons-list{
+    display: flex;
+    justify-content: space-around;
+    align-items: center;
+  }
+
+  .marker{
+    transition: scale .25s ease;
+    scale: 1;
+  }
+
+  .marker:hover{
+    scale: 1.1;
+  }
+
+
+  .marker-container{
+    pointer-events: all !important;
+  }
+
+  .selected > div > .marker{
+    display: none;
+  }
+
+  .selected .marker-window{
+    display:block;
+    position: relative;
+  }
+
+  .selected .alert-icon::before,
+  .marker-window .alert-icon::before{
+    display:none;
+  }
+
+  .alert-icon::before {
+    content: '';
+    position: absolute;
+    top: -10px;
+    left: -15px;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    background: rgba(255, 0, 0, 0.7);
+    animation: pulse 2s infinite;
+    z-index: -1;
+  }
+
+  @keyframes pulse {
+    0% {
+      transform: scale(0.5);
+      opacity: 0;
+    }
+    10% {
+      opacity: .3;
+    }
+    75% {
+      opacity: .3;
+    }
+    100% {
+      transform: scale(1);
+      opacity: 0;
+    }
+  }
+
+</style>
+<script type="text/javascript">
+
+    const markers = {};
+    let devices = [];
+
+    // Initialize and add the map
+    let map;
+    let numSelected = 0;
+
+    let AdvancedMarkerElement;
+    let bounds;
+    let selectedAttribute = $('#attribute-selector').val() || 'battery';
+
+    // Rebuild markers when changing attribute
+    $(document).on('change','#attribute-selector',() => {
+      selectedAttribute = $('#attribute-selector').val();
+      resetMarkers();
+      setAllMarkers();
+    });
+
+    // Initialize map
+    async function initMap() {
+      
+      // load libraries
+      const { Map } = await google.maps.importLibrary("maps");
+      const markerLibrary = await google.maps.importLibrary("marker");
+      AdvancedMarkerElement = markerLibrary.AdvancedMarkerElement;
+
+      // create map
+      map = new Map(document.getElementById("map"), {
+        zoom: 4,
+        center: { lat: 39.1362235, lng: -84.7055515 },
+        mapId: "DEMO_MAP_ID",
+      });
+
+      // deselect all markers when click empty map area
+      map.addListener('click', () => {
+        resetMarkers();
+      });
+
+      // create bounds for tracking bounding box of markers
+      bounds = new google.maps.LatLngBounds();
+      
+      // set up markers
+      if(devices.length){
+        setAllMarkers();
+      }
+    }
+
+    // New data, remake markers
+    const updateMap = (data) => {
+      devices = data.queries.device.items;
+      setAllMarkers();
+    }
+
+    // Set up markers
+    const setAllMarkers = () => {
+
+      // Set up each marker, tracking whether it was eligible to show (location + selected attribute)
+      const updatedIds = new Set();
+      devices.forEach( device => {
+        if(setUpMarker(device.id, device)){
+          updatedIds.add(device.id);
+        }
+      });
+
+      // Remove markers that are no longer present
+      Object.keys(markers).forEach( (key) => {
+        if(!updatedIds.has(key)){
+          markers[key].setMap(null);
+          delete markers[key];
+        }
+      });
+
+      // expand map to fit bounds of markers
+      map.fitBounds(bounds);
+    }
+
+    // deselect all markers
+    const resetMarkers = () => {
+      numSelected = 0;
+      Object.values(markers).forEach( (marker) => {
+        marker.selected = false;
+        marker.zIndex = 0;
+        marker.content?.classList?.remove('selected');
+      });
+    }
+
+    // set up individual marker
+    const setUpMarker = (id, data) => {
+
+      if(!data.attributeValues?.location){
+        return false;
+      }
+
+      // Pull marker from dictionary, or create new
+      let marker = markers[id];
+      
+      if(!marker){ 
+        marker = new AdvancedMarkerElement({
+          map: map
+        });
+
+        // toggle selected on click
+        marker.addListener('click',()=>{
+          marker.selected = !marker.selected; // save selected state in marker obj
+          if(marker.selected){
+            marker.content.classList.add('selected');
+            numSelected += 1;
+            marker.zIndex = numSelected;
+          }else{
+            marker.content.classList.remove('selected');
+            numSelected -= 1;
+          }
+        });
+        markers[id] = marker;
+      }
+
+      // Create icons for all attributes for this device
+      // 1 of these will serve as marker on map
+      // others used when marker is selected
+      // NOTE: Must be rebuilt on every update for new data
+      const attributes = ['battery','temperature','humidity'];
+      const icons = {};
+
+      attributes.forEach( (attr) => {
+        try {
+          // Build icon
+          icons[attr] = buildIcon(data,attr);
+        } catch (error) {
+          if (error instanceof TypeError) {
+            icons[attr] = null;
+            return false; // dont have this attribute for this device
+          }else {
+            console.error(error)
+          }
+        }
+      }, {});
+
+      // If device does not have selected attribute, show no marker for it
+      if(!icons[selectedAttribute]){
+        return false;
+      }
+
+      // Set up marker content = the selected icon + the expandable window
+      const container = document.createElement('div');
+      container.classList.add('marker-container');
+      container.appendChild(icons[selectedAttribute].icon);
+      container.appendChild(iconWindowHTML(data,icons));
+      marker.content = container;
+
+      // Update position
+      marker.position = parseLocation(data.attributeValues?.location);
+      bounds.extend(marker.position);
+
+      // if marker is already selected, make sure it still has marker window open
+      if(marker.selected){
+        marker.content.classList.add('selected');
+      }
+
+      return true;
+    }
+
+    const buildIcon = (data,attr) => {
+      
+      const value = data.attributeValues?.[attr];
+      const meta = data.attributes?.find(a => a.name === attr);
+
+      if(!value || !meta){
+        throw new TypeError('Missing values'); // value at this point is string, so "0" won't fail
+      }
+
+      const min = meta.attributeTags?.min ? Number(meta.attributeTags.min) : 0;
+      const max = meta.attributeTags?.max ? Number(meta.attributeTags.max) : 100;
+      const unit = meta.attributeTags?.unit || '';
+      const percent = (value - min) / (max - min) * 100;
+
+      const status = statusByValue(value,meta);
+      const colors = colorsByStatus[status];
+      
+      const icon = document.createElement("div");
+      icon.innerHTML = iconHTML(attr,percent,value,colors,unit); 
+
+      if(status === 'critical'){
+        icon.classList.add('alert-icon');
+      }
+      
+      return {
+        attribute: attr,
+        value,
+        meta,
+        unit,
+        icon
+      }
+    }
+
+    // given a value and an attribute's meta, is it currently critical, warning, or normal
+    const statusByValue = (value,meta) => {
+      const warningLower = meta.attributeTags?.warningLower ? Number(meta.attributeTags.warningLower) : 0;
+      const warningUpper = meta.attributeTags?.warningUpper ? Number(meta.attributeTags.warningUpper) : 100;
+      const criticalLower = meta.attributeTags?.criticalLower ? Number(meta.attributeTags.criticalLower) : 0;
+      const criticalUpper = meta.attributeTags?.criticalUpper ? Number(meta.attributeTags.criticalUpper) : 100;
+       
+      if(value < criticalLower || value > criticalUpper){
+        return 'critical';
+      }
+
+      if(value < warningLower || value > warningUpper){
+        return 'warning';
+      }
+
+      return 'normal';
+    }
+
+    // given a status, what colors should be used
+    const colorsByStatus = {
+      "critical": {
+            background: "#FF0000",
+            foreground: "#FFFFFF"
+          },
+      "warning": {
+            background: "#FF9900",
+            foreground: "#FFFFFF"
+          },
+      "normal": {
+            background: "#00BB00",
+            foreground: "#FFFFFF"
+          }
+      }
+
+    // html for the marker
+    const iconHTML = (attr,percent,value,colors,unit) => {
+
+      if(attr === "battery"){
+        return `
+            <div title="${value}${unit}" class="marker">
+              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="30" viewBox="0 0 55 120">
+                <rect x="10" y="7" width="45" height="102" stroke="black" fill="white" stroke-width="5"/>
+                <rect x="12" y="${107-percent}" width="40" height="${percent + 1}" stroke="black" fill="${colors.background}" stroke-width="0"/>
+                <rect x="12" y="30" width="20" height="4" fill="black" />
+                <rect x="12" y="55" width="20" height="4" fill="black" />
+                <rect x="12" y="80" width="20" height="4" fill="black" />
+                <rect x="25" y="0" width="15" height="8" stroke="black" fill="black" stroke-width="3"/>
+              </svg>
+            </div>`;
+      }
+
+      if(attr === "temperature"){
+        return `
+            <div title="${value}${unit}" class="marker">
+              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="30" viewBox="0 0 35 155">
+                  <rect x="17" y="10" width="30" height="100" stroke="black" fill="white" stroke-width="5"/>
+                  <rect x="18" y="${107-percent}" width="28" height="${percent}" stroke="black" fill="${colors.background}" stroke-width="0"/>
+                  <rect x="25" y="30" width="8" height="4" fill="black" />
+                  <rect x="25" y="57" width="8" height="4" fill="black" />
+                  <rect x="25" y="82" width="12" height="4" fill="black" />
+                  <circle cx="32" cy="130" r="22" stroke="black" fill="${colors.background}" stroke-width="5"/>
+              </svg>
+            </div>`;
+      }
+
+      return `
+          <div title="${value}${unit}" class="marker circle" style="background-color:${colors.background};color:${colors.foreground}"> 
+            <div>${value}${unit}</div>
+          </div>`;
+    }
+
+    // html for when the marker is selected
+    const iconWindowHTML = (data, iconsData) => {
+        const iconWindowElement = document.createElement('div');
+        iconWindowElement.classList.add('card', 'marker-window');
+
+        const iconsHTML = Object.values(iconsData).map(iconData => {
+          if(!iconData?.icon){
+            return '';
+          }
+          return `
+            <div class="d-flex flex-column align-items-center mr-1">
+              ${iconData.icon.outerHTML}
+              <div class="m-1">
+                ${iconData.value}${iconData.unit}
+              </div>
+              <div>
+                ${iconData.attribute}
+              </div>
+            </div>`;
+          }).join('');
+
+        iconWindowElement.innerHTML = `
+            <div class="card-body">
+                <h6 class="card-title">${data.name}</h6>
+                <div class="icons-list">
+                    ${iconsHTML}
+                </div>
+            </div>
+        `;
+
+        return iconWindowElement;
+    };
+
+    // "lat,lng" => LatLng literal
+    const parseLocation = (locationString) => {
+      if (!locationString) {
+          return null;
+      }
+      const parts = locationString.split(',');
+      if (parts.length !== 2) {
+          return null;
+      }
+      const [first, second] = parts;
+      const firstNum = parseFloat(first);
+      const secondNum = parseFloat(second);
+      if (isNaN(firstNum) || isNaN(secondNum)) {
+          return null;
+      }
+      return {lat:firstNum, lng:secondNum};
+    }
+
+  initMap();
+ 
+  DashboardBlock.on('change', updateMap);
+
+
+
+</script>
